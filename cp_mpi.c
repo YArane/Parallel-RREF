@@ -58,7 +58,7 @@ int main(int argc, char *argv[]){
 			exit(-1);
 	}	
 	//computation//
-	RREF_p(matrix, lines, columns);	
+	REF(matrix, lines, columns);	
 //	print_matrix(matrix, lines, columns);
 //	print(m);
 	RREF(m, rows);
@@ -119,15 +119,15 @@ void REF(double *matrix, int row_limit, int columns){
 }
 
 
-void RREF(double *matrix, int rows){
-	int row, row2;
-	for(row=rows-1;row>=0;row--){
-		matrix[row*columns+columns-1] = matrix[row*columns+columns-1]/matrix[row*columns+row];
-		matrix[row*columns+row] = 1;
-		for(row2=row-1;row2>=0;row2--){
-			matrix[row2*columns+columns-1] += matrix[row2*columns+row] * matrix[row*columns+columns-1];
-			matrix[row2*columns+row] = 0;
-		}	
+void RREF(double *matrix, int row_limit){
+	int row, col, i;
+	for(col=columns-2, i=rows-1;col>=0;col--, i--){
+		for(row=0;row<row_limit;row++){
+			if(col == row)
+				break;
+			matrix[row*columns+columns-1] -= matrix[row*columns+col]*matrix[i*columns+columns-1];
+			matrix[row*columns+col] = 0;
+		}
 	}
 }
 
