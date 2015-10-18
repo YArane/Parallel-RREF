@@ -1,5 +1,6 @@
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include <math.h>
 #include <mpi.h>
 #include <sys/time.h>
@@ -19,11 +20,12 @@ double find_local_max(double *, int);
 double find_global_max(double);
 void divide_by_max(double *, int, double);
 void write_clicking_probabilities(double *, int);
+void print_best_acceptance_threshold(double *, int);
 
 int rank, np;
 int rows, columns;
 int bufferSize, lines, linesPerBuffer, overflow, lineSize;
-double *m;
+double *cp, *m;
 MPI_Status status;
 
 int main(int argc, char *argv[]){
@@ -47,11 +49,11 @@ int main(int argc, char *argv[]){
 	MPI_Comm_size(MPI_COMM_WORLD, &np);
 
 	fileName = argv[1];
-	int z;
+/*	int z;
 	for(z=0;z<100;z++){
 	if(rank == 0){
 		gettimeofday(&start, NULL);
-	}
+	}*/
 
 	//get size of matrix
 	get_size_of_matrix(fileName);
@@ -67,7 +69,7 @@ int main(int argc, char *argv[]){
 //	print_matrix(matrix, lines, columns);
 	//create clicking probabilities vector
 
-	if((m = malloc((rows * columns) * sizeof(double))) == NULL){
+	if((m = malloc((rows * columns) * sizeof(double))) == NULL || (cp = malloc(lines * sizeof(double))) == NULL){
 			printf("error allocating matrix.\n");
 			exit(-1);
 	}	
@@ -81,15 +83,15 @@ int main(int argc, char *argv[]){
 	MPI_Gather(matrix,columns*lines,MPI_DOUBLE,m,columns*lines,MPI_DOUBLE,0,MPI_COMM_WORLD);
 
 	write_clicking_probabilities(m, rows);
-
-	if(rank == 0){
-		gettimeofday(&end, NULL);
-		printf(/*"\n\nAlgorithm's computational part duration :*/"%ld\n", \
+	print_best_acceptance_threshold(cp, lines);
+//	if(rank == 0){
+//		gettimeofday(&end, NULL);
+//		printf(/*"\n\nAlgorithm's computational part duration :*/"%ld\n", \
 					((end.tv_sec * 1000000 + end.tv_usec) - (start.tv_sec * 1000000 + start.tv_usec)));
-	}	
+//	}	
 
 
-	}
+//	}
 	//terminate MPI
 	if(MPI_SUCCESS != MPI_Finalize()){
 		printf("error terminating MPI.\n");
@@ -214,6 +216,7 @@ void write_clicking_probabilities(double *matrix, int row_limit){
 		exit(-1);
 	}
 
+
 	int i;
 	for(i=0;i<row_limit;i++){
 		fprintf(file, "%lf\n", *(matrix+i*columns+columns-1));
@@ -241,6 +244,7 @@ void divide_by_max(double *matrix, int row_limit, double max){
 	int i;
 	for(i=0;i<row_limit;i++){
 		matrix[i*columns+columns-1] = fabs(matrix[i*columns+columns-1] / max);
+		*(cp+i) = *(matrix+i*columns+columns-1);
 	}
 }
 
@@ -447,4 +451,31 @@ void get_size_of_matrix(char *fileName){
 		}
 	}
 	fclose(file);
+}
+
+void print_best_acceptance_threshold(double *cp, int row_limit) {
+	
+	double threshold, local_profit;
+	double global_profit, max_profit = 0, t;
+	int i;
+
+	for(threshold=0.2;threshold<=1.0;threshold+=0.2){
+		local_profit = 0;
+		for(i=0;i<row_limit;i++){
+			if(*(cp+i) > threshold){
+				local_profit += *(cp+i) - 2*(1-*(cp+i));
+			}
+		}
+		MPI_Reduce(&local_profit, &global_profit, 1, MPI_DOUBLE, MPI_SUM, 0, MPI_COMM_WORLD);
+		if(rank == 0){
+			if(global_profit > max_profit){
+				max_profit = global_profit;
+				t = threshold;
+			}
+		}
+	}
+
+	if(rank == 0)
+		printf("Acceptance threshold to max profit: %lf -> $%lf\n", t, max_profit);
+
 }
