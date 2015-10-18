@@ -24,8 +24,6 @@ int main(int argc, char * argv[])
 	/* setup */
 	int rows, columns;
 	if (argc != 2) printf("please provide a user matrix!");
-	int z;
-	for(z=0;z<100;z++){
 	gettimeofday(&start, NULL);
 	double **A = read_user_matrix_from_file(argv[1], &rows, &columns);
 	double *cp = malloc(columns * sizeof(double)); // clicking probabilities
@@ -41,9 +39,8 @@ int main(int argc, char * argv[])
 	free_matrix(A, rows);
 	free(cp);
 		gettimeofday(&end, NULL);
-		printf(/*"\n\nAlgorithm's computational part duration :*/"%ld\n", \
+		printf("\n\nAlgorithm's computational part duration :%ld\n", \
 					((end.tv_sec * 1000000 + end.tv_usec) - (start.tv_sec * 1000000 + start.tv_usec)));
-	}
 	return 0;
 }
 

@@ -2,6 +2,7 @@
 #include <stdlib.h>
 #include <math.h>
 #include <mpi.h>
+#include <sys/time.h>
 
 void get_size_of_matrix(char *);
 void get_lineSize(int *);
@@ -29,6 +30,7 @@ int main(int argc, char *argv[]){
 	char *fileName;
 	int charsPerLine;
 	
+	struct timeval start, end; //struct used to compute execution time
 
 	//check user input
 	if(argc != 2){
@@ -45,7 +47,12 @@ int main(int argc, char *argv[]){
 	MPI_Comm_size(MPI_COMM_WORLD, &np);
 
 	fileName = argv[1];
-	
+	int z;
+	for(z=0;z<100;z++){
+	if(rank == 0){
+		gettimeofday(&start, NULL);
+	}
+
 	//get size of matrix
 	get_size_of_matrix(fileName);
 	//get size of each line (in bytes)
@@ -75,15 +82,22 @@ int main(int argc, char *argv[]){
 
 	write_clicking_probabilities(m, rows);
 
+	if(rank == 0){
+		gettimeofday(&end, NULL);
+		printf(/*"\n\nAlgorithm's computational part duration :*/"%ld\n", \
+					((end.tv_sec * 1000000 + end.tv_usec) - (start.tv_sec * 1000000 + start.tv_usec)));
+	}	
 
+
+	}
 	//terminate MPI
 	if(MPI_SUCCESS != MPI_Finalize()){
 		printf("error terminating MPI.\n");
 		exit(-1);
 	}
-
 	return 0; 
 }
+
 
 int get_proc_with_row(int row){
 	int i, acc=0;
