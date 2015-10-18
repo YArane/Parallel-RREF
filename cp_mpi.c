@@ -5,22 +5,25 @@
 
 void get_size_of_matrix(char *);
 void get_lineSize(int *);
+int get_buffer_size(int);
+int get_row_limit(int);
 double * read_user_matrix(char *, int);
 double * load_user_matrix();
 void print_matrix(double *, int, int);
 void print(double *);
 void RREF(double *, int); 
+void RREF_p(double *, int); 
 void REF(double *, int, int);
 
 int rank, np;
 int rows, columns;
-int bufferSize, lines;
+int bufferSize, lines, linesPerBuffer, overflow, lineSize;
 double *m;
 MPI_Status status;
 
 int main(int argc, char *argv[]){
 	char *fileName;
-	int lineSize, charsPerLine;
+	int charsPerLine;
 	
 
 	//check user input
@@ -59,10 +62,12 @@ int main(int argc, char *argv[]){
 	}	
 	//computation//
 	REF(matrix, lines, columns);	
-//	print_matrix(matrix, lines, columns);
+	//print_matrix(matrix, lines, columns);
 //	print(m);
-	RREF(m, rows);
-	print(m);
+	//RREF(m, rows);
+	RREF_p(matrix, lines);
+	print_matrix(matrix, lines, columns);
+
 	//terminate MPI
 	if(MPI_SUCCESS != MPI_Finalize()){
 		printf("error terminating MPI.\n");
@@ -70,6 +75,17 @@ int main(int argc, char *argv[]){
 	}
 
 	return 0; 
+}
+
+int get_proc_with_row(int row){
+	int i, acc=0;
+	for(i=0;i<np;i++){
+		acc += get_row_limit(i);
+		if(row < acc){
+			return i;
+		}
+	}
+	return -1;
 }
 
 void REF(double *matrix, int row_limit, int columns){
@@ -110,14 +126,23 @@ void REF(double *matrix, int row_limit, int columns){
 			matrix[i*columns+row+rank*row_limit] = 0;
 		}
 	}
-	for(i=(rank+1)*row_limit;i<columns-1;i++){
-		MPI_Bcast(tmp, columns, MPI_DOUBLE, i/row_limit, MPI_COMM_WORLD);
+	//TODO: fix
+	for(i=(rank+1)*get_row_limit(rank+1);i<columns-1;i++){
+		MPI_Bcast(tmp, columns, MPI_DOUBLE, i/get_row_limit(rank+1), MPI_COMM_WORLD);
 	}
+/*	for(i=(rank+1)*row_limit;i<columns-1;i++){
+		printf("%d\n", i/row_limit);
+		MPI_Bcast(tmp, columns, MPI_DOUBLE, i/row_limit, MPI_COMM_WORLD);
+	}*/
 
 	MPI_Barrier(MPI_COMM_WORLD);
 	MPI_Gather(matrix,columns*row_limit,MPI_DOUBLE,m,columns*row_limit,MPI_DOUBLE,0,MPI_COMM_WORLD);
 }
 
+//returns the number of rows in the inputed processor
+int get_row_limit(int proc){
+	return get_buffer_size(proc)/lineSize;
+}
 
 void RREF(double *matrix, int row_limit){
 	int row, col, i;
@@ -129,6 +154,33 @@ void RREF(double *matrix, int row_limit){
 			matrix[row*columns+col] = 0;
 		}
 	}
+}
+
+void RREF_p(double *matrix, int row_limit){
+	int row, col, i, j;
+	double b=1;
+	for(col=columns-2, i=rows-1, j=1;col>=0;col--, i--, j++){
+		
+		if(rank == get_proc_with_row(i)){
+			if(j%row_limit == 0){
+				MPI_Bcast(&matrix[columns-1], 1, MPI_DOUBLE, rank, MPI_COMM_WORLD);
+				b = matrix[columns-1];
+			}else{
+				MPI_Bcast(&matrix[(row_limit-j%row_limit)*columns+columns-1], 1, MPI_DOUBLE, rank, MPI_COMM_WORLD);
+				b = matrix[(row_limit-j%row_limit)*columns+columns-1];
+			}	
+		}else{
+			MPI_Bcast(&b, 1, MPI_DOUBLE, get_proc_with_row(i), MPI_COMM_WORLD);
+		}
+
+		for(row=0;row<row_limit;row++){
+			if(col == row || matrix[row*columns+col] == 1)
+				break;
+			matrix[row*columns+columns-1] -= matrix[row*columns+col]*b;
+			matrix[row*columns+col] = 0;
+		}
+	}
+	
 }
 
 double * allocate_matrix(int lines){
@@ -211,6 +263,10 @@ double * load_user_matrix(char *buffer, int lineSize){
 	return matrix;
 }
 
+int get_buffer_size(int proc){
+	return (proc < overflow)? (linesPerBuffer+1) * lineSize : linesPerBuffer * lineSize; 
+}
+
 //reads matrix from file and stores into buffers
 double * read_user_matrix(char *fileName, int lineSize){
 	MPI_File file;
@@ -219,14 +275,13 @@ double * read_user_matrix(char *fileName, int lineSize){
 	//lets divide up our file..
 
 	//how many lines per buffer?
-	int linesPerBuffer = rows / np;
+	linesPerBuffer = rows / np;
 	//don't forget the overflow!
-	int overflow = rows % np; //overflow: [0- np-1]
+	overflow = rows % np; //overflow: [0- np-1]
 
 	//so what's the size of each buffer? 
 		//overflow check
-	bufferSize = (rank < overflow)? (linesPerBuffer+1) * lineSize : linesPerBuffer * lineSize; 
-
+	bufferSize = get_buffer_size(rank);//(rank < overflow)? (linesPerBuffer+1) * lineSize : linesPerBuffer * lineSize; 
 
 	//lets create the buffer
 	char *buffer;
@@ -246,7 +301,6 @@ double * read_user_matrix(char *fileName, int lineSize){
 	}else{
 		seek = ((linesPerBuffer+1)*lineSize * (rank-1)) + ((linesPerBuffer)*lineSize * (rank-overflow));
 	}
-
 
 	MPI_File_open(MPI_COMM_WORLD, fileName, MPI_MODE_RDONLY, MPI_INFO_NULL, &file);
 	MPI_File_seek(file, seek, MPI_SEEK_SET);
