@@ -14,6 +14,10 @@ void print(double *);
 void RREF(double *, int); 
 void RREF_p(double *, int); 
 void REF(double *, int, int);
+double find_local_max(double *, int);
+double find_global_max(double);
+void divide_by_max(double *, int, double);
+void write_clicking_probabilities(double *, int);
 
 int rank, np;
 int rows, columns;
@@ -56,17 +60,21 @@ int main(int argc, char *argv[]){
 //	print_matrix(matrix, lines, columns);
 	//create clicking probabilities vector
 
-	if((m = malloc((rows*columns) * sizeof(double))) == NULL){
+	if((m = malloc((rows * columns) * sizeof(double))) == NULL){
 			printf("error allocating matrix.\n");
 			exit(-1);
 	}	
 	//computation//
 	REF(matrix, lines, columns);	
-	//print_matrix(matrix, lines, columns);
-//	print(m);
-	//RREF(m, rows);
 	RREF_p(matrix, lines);
-	print_matrix(matrix, lines, columns);
+	
+//	print_matrix(matrix, lines, columns);
+	divide_by_max(matrix, lines, find_global_max(find_local_max(matrix, lines)));
+
+	MPI_Gather(matrix,columns*lines,MPI_DOUBLE,m,columns*lines,MPI_DOUBLE,0,MPI_COMM_WORLD);
+
+	write_clicking_probabilities(m, rows);
+
 
 	//terminate MPI
 	if(MPI_SUCCESS != MPI_Finalize()){
@@ -182,6 +190,86 @@ void RREF_p(double *matrix, int row_limit){
 	}
 	
 }
+
+void write_clicking_probabilities(double *matrix, int row_limit){
+	if(rank == 0){
+	FILE *file;
+
+	if((file = fopen("clicking_probabilities.txt", "w")) == 0){
+		printf("error creating file.\n");
+		exit(-1);
+	}
+
+	int i;
+	for(i=0;i<row_limit;i++){
+		fprintf(file, "%lf\n", *(matrix+i*columns+columns-1));
+	}
+
+	fclose(file);
+	}
+/*	MPI_File file;
+
+	char *fileName = "clicking_probabilities.txt";
+	MPI_File_open(MPI_COMM_WORLD, fileName, MPI_MODE_CREATE, MPI_INFO_NULL, &file);
+
+	int i;
+	for(i=0;i<row_limit;i++){
+		printf("%lf\n", *(matrix+i*columns+columns-1));
+		MPI_File_write_shared(file, matrix+(i*columns+columns-1), 1, MPI_DOUBLE, &status);
+	}
+
+	MPI_Barrier(MPI_COMM_WORLD); //wait until all processes finished reading
+	MPI_File_close(&file);*/
+
+}
+
+void divide_by_max(double *matrix, int row_limit, double max){
+	int i;
+	for(i=0;i<row_limit;i++){
+		matrix[i*columns+columns-1] = fabs(matrix[i*columns+columns-1] / max);
+	}
+}
+
+double find_global_max(double localMax){
+	double globalMax = localMax;
+	if(np == 1){
+		return globalMax;
+	}
+	//send all local maxi to the root to process
+	if(rank != 0){
+		MPI_Send(&localMax, 1, MPI_DOUBLE, 0, 0, MPI_COMM_WORLD);
+		MPI_Bcast(&globalMax, 1, MPI_DOUBLE, 0, MPI_COMM_WORLD);
+	}else{ //root
+
+		int i;
+		double *maxi;
+		maxi = malloc(sizeof(double) * np-1);
+		for(i=1;i<np;i++){
+			MPI_Recv((maxi+i-1), 1, MPI_DOUBLE, i, 0, MPI_COMM_WORLD, &status);
+		}
+	
+		for(i=0;i<np-1;i++){
+			if(globalMax < maxi[i]){
+				globalMax = maxi[i];
+			}
+		}
+		MPI_Bcast(&globalMax, 1, MPI_DOUBLE, 0, MPI_COMM_WORLD);
+	}
+
+	return globalMax;
+}
+
+double find_local_max(double *matrix, int row_limit){
+	
+	int i;
+	double localMax = 0;
+	for(i=0;i<row_limit;i++){
+		if(fabs(matrix[i*columns+columns-1]) > localMax)
+			localMax = fabs(matrix[i*columns+columns-1]);
+	}
+	return localMax;
+}
+
 
 double * allocate_matrix(int lines){
 	double *matrix;
